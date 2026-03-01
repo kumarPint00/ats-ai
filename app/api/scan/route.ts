@@ -136,6 +136,8 @@ export async function POST(request: Request) {
         jdText,
         score: result.score,
         summary: result.summary,
+        // store entire result object so we have everything returned by the AI
+        result,
         createdAt: new Date().toISOString(),
       });
     } catch (e) {
