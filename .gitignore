@@ -43,3 +43,5 @@ next-env.d.ts
 # application data
 /data
 *.json
+data/scans.db
+data/*.db

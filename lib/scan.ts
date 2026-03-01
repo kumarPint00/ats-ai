@@ -37,6 +37,33 @@ export interface ScanResult {
  * Use the Groq chat completion API to compare a resume with a job description.
  * Returns a structured score, keyword matches and gaps.
  */
+/**
+ * Fetch wrapper with exponential backoff retry.
+ * Retries only on transient server-side errors (429, 503).
+ * Non-retriable errors (4xx other than 429) throw immediately.
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = 3
+): Promise<Response> {
+  const RETRIABLE = new Set([429, 503]);
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const resp = await fetch(url, options);
+    if (resp.ok) return resp;
+    if (!RETRIABLE.has(resp.status)) {
+      // Non-retriable: surface immediately
+      const text = await resp.text();
+      throw new Error(`Groq API error: ${text}`);
+    }
+    if (attempt < retries - 1) {
+      // 1 s, 2 s, 4 s backoff
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+    }
+  }
+  throw new Error("AI service is busy. Please try again shortly.");
+}
+
 export async function scanWithGroq(
   resumeText: string,
   jdText: string
@@ -72,7 +99,7 @@ ${resumeText}
 JOB DESCRIPTION:
 ${jdText}`;
 
-  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const resp = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,
@@ -88,11 +115,6 @@ ${jdText}`;
       response_format: { type: "json_object" },
     }),
   });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Groq API error: ${text}`);
-  }
 
   const data = await resp.json();
   const content = data.choices[0].message.content;

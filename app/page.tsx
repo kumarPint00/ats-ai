@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ACCEPTED_EXTENSIONS } from "../lib/fileTypes";
 import {
   Box,
   Button,
@@ -125,7 +126,7 @@ export default function Home() {
             ATS Resume Scanner
           </Typography>
           <Typography sx={{ color: "rgba(255,255,255,0.38)", fontSize: "0.95rem", letterSpacing: 0.5 }}>
-            Deep resume analysis · Powered by Groq · LLaMA&nbsp;3.3&nbsp;70B
+            Deep resume analysis · Powered by Groq · LLaMA&nbsp;3.3&nbsp;70B · PDF, Word, ODT, TXT&nbsp;&amp;&nbsp;more
           </Typography>
         </Box>
 
@@ -185,11 +186,11 @@ export default function Home() {
                     transition: "all 0.25s",
                   }}
                 >
-                  📎 Upload PDF / TXT
+                  📎 Upload Document
                   <input
                     type="file"
                     hidden
-                    accept=".pdf,.txt"
+                    accept={ACCEPTED_EXTENSIONS}
                     onChange={(e) => e.target.files?.[0] && fileSetter(e.target.files[0])}
                   />
                 </Button>
