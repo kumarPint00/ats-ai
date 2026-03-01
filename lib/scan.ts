@@ -37,6 +37,8 @@ export interface ScanResult {
   preparationGuide: string[];
   // a brief professional self‑introduction the candidate could use at interview start
   selfIntro: string;
+  // actionable suggestions for resume tweaks to improve ATS score
+  atsSuggestions: string[];
 }
 
 /**
@@ -92,6 +94,7 @@ Perform a thorough deep-dive analysis and return ONLY valid JSON with this exact
   "strongPoints": ["concrete strengths of this resume relative to the JD — be specific"],
   "weakPoints": ["concrete weaknesses or gaps — be specific and constructive"],
   "selfIntro": "a brief 2-3 sentence professional introduction the candidate could use at the start of an interview",
+  "atsSuggestions": ["specific changes the candidate should make to their resume to improve the ATS score"],
 
   "interviewQuestions": [
      { "skill": "string", "question": "string" }
@@ -105,10 +108,11 @@ Perform a thorough deep-dive analysis and return ONLY valid JSON with this exact
 }
 
 Instructions:
-- Identify the "strongly required" skills mentioned in the job description and, for **each** such skill, generate **15 unique interview questions** targeting that skill.
+- Identify the "strongly required" skills mentioned in the job description and generate **between 30 and 50 total interview questions**, distributing them across those skills.
 - Prefix or tag each question object with the corresponding skill name.
 - After listing all questions, provide an "answers" map where each key exactly matches one of the question texts and the value is a short (2-3 sentence) interview-ready answer.
-- If no strongly required skills can be detected, fall back to exactly 10 generic questions with skill value "generic" and provide answers accordingly.
+- Provide an array of "atsSuggestions" containing concrete resume edits that would help the candidate pass the ATS.
+- If no strongly required skills can be detected, fall back to 10 generic questions with skill value "generic" and still supply answers and ATS suggestions.
 
 Be specific, practical, and tailored to THIS resume and JD. Do not give generic advice.`;
 
