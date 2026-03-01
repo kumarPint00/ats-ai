@@ -153,20 +153,36 @@ ${jdText}`;
   const content = data.choices[0].message.content;
   const parsed = JSON.parse(content) as ScanResult;
 
-  // ── Recompute score from actual match data so a hallucinated fixed value
-  //    can never slip through. Use LLM score only if it used the rubric
-  //    (i.e. matchedCount and totalRequired are present and consistent).
-  const m = parsed.matches?.length ?? 0;
-  const miss = parsed.missing?.length ?? 0;
+  // ── Ground-truth keyword verification ─────────────────────────────────────
+  // The LLM can hallucinate matches/missing. We verify every skill it reported
+  // against the ACTUAL resume text (case-insensitive substring check).
+  // Skills the LLM claimed matched but aren't in the resume → moved to missing.
+  // Skills the LLM claimed were missing but ARE in the resume → moved to matches.
+  const resumeLower = resumeText.toLowerCase();
+
+  const llmMatches  = parsed.matches  ?? [];
+  const llmMissing  = parsed.missing  ?? [];
+
+  // A skill "exists in resume" if any word of it appears as a substring
+  const inResume = (skill: string) => resumeLower.includes(skill.toLowerCase());
+
+  const verifiedMatches  = llmMatches.filter(s =>  inResume(s));
+  const falseMatches     = llmMatches.filter(s => !inResume(s)); // claimed matched but not found
+  const verifiedMissing  = llmMissing.filter(s => !inResume(s));
+  const falselyMissing   = llmMissing.filter(s =>  inResume(s)); // claimed missing but actually there
+
+  parsed.matches = [...verifiedMatches, ...falselyMissing];
+  parsed.missing = [...verifiedMissing, ...falseMatches];
+
+  // ── Recompute score from verified match data ────────────────────────────────
+  const m     = parsed.matches.length;
+  const miss  = parsed.missing.length;
   const total = m + miss;
   if (total > 0) {
-    // weighted: matches carry 80% weight, deduct for missing critical skills
-    const base = m / total;
-    // use LLM-provided score only if it's within ±0.15 of our derived base
+    const base     = m / total;
     const llmScore = parsed.score ?? 0;
-    const deviation = Math.abs(llmScore - base);
-    if (deviation > 0.15 || llmScore === 0.85) {
-      // LLM returned a suspicious/fixed value — override with our calculation
+    // Override if LLM score deviates >15% from reality or is the classic fixed value
+    if (Math.abs(llmScore - base) > 0.15 || llmScore === 0.85) {
       parsed.score = Math.min(0.98, Math.max(0.10, parseFloat(base.toFixed(2))));
     }
   }
