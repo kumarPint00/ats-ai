@@ -79,59 +79,87 @@ export async function scanWithGroq(
   jdText: string
 ): Promise<ScanResult> {
   const key = process.env.GROQ_API_KEY;
-  if (!key) {
-    throw new Error("GROQ_API_KEY is not set in your environment.");
-  }
+  if (!key) throw new Error("GROQ_API_KEY is not set in your environment.");
 
-  const systemPrompt = `You are an expert career coach and ATS analyst with 15+ years of recruiting experience.
-You will receive a candidate's resume and a job description.
-Perform a thorough deep-dive analysis and return ONLY valid JSON with this exact structure (no extra keys, no markdown):
+  // ── Step 1: Extract keyword tokens from both documents ──────────────────────
+  // These are sent alongside the full texts so the LLM can do semantic matching
+  // against a structured vocabulary rather than free-reading both walls of text.
+  const jdWords = extractKeywords(jdText);
+  const cvWords = extractKeywords(resumeText);
+
+  // ── Step 2: Build prompt ────────────────────────────────────────────────────
+  const systemPrompt = `You are a senior ATS analyst and career coach with 15+ years of recruiting experience.
+
+You will receive:
+  1. JD EXTRACTED KEYWORDS — individual tokens pulled from the Job Description
+  2. CV EXTRACTED KEYWORDS  — individual tokens pulled from the Candidate's Resume
+  3. The full Job Description text
+  4. The full Resume text
+
+Perform a precise gap analysis and return ONLY valid JSON (no markdown fences, no extra keys):
 {
-  "score": <compute this precisely using the formula below — do NOT default to 0.85>,
-  "matchedCount": <number of JD keywords/skills found in resume>,
-  "totalRequired": <number of total required keywords/skills identified in the JD>,
-  "matches": ["list of skills/keywords present in BOTH resume and JD"],
-  "missing": ["important skills/keywords in JD that are absent from resume"],
-  "summary": "2-3 sentence overall assessment of the candidate's fit",
-  "grammarSuggestions": ["specific phrasing issues in the format: Original: '...' → Suggested: '...'"],
-
-  "strongPoints": ["concrete strengths of this resume relative to the JD — be specific"],
-  "weakPoints": ["concrete weaknesses or gaps — be specific and constructive"],
-  "selfIntro": "a brief 2-3 sentence professional introduction the candidate could use at the start of an interview",
-  "atsSuggestions": ["specific changes the candidate should make to their resume to improve the ATS score"],
-
+  "score": <decimal 0.10–0.98 — see scoring rules below>,
+  "matchedCount": <integer: count of matched skills>,
+  "totalRequired": <integer: count of all JD skills you evaluated>,
+  "matches": [
+    "Skill or technology from the JD that is clearly present in the resume — use the natural skill name, e.g. 'Python', 'REST APIs', 'Agile'"
+  ],
+  "missing": [
+    "Skill or technology required/preferred in the JD that is absent from the resume"
+  ],
+  "summary": "2-3 sentence overall assessment of candidate fit for this specific role",
+  "grammarSuggestions": ["Resume issue — format: Original: '...' → Suggested: '...'"],
+  "strongPoints": [
+    "A specific skill, achievement, or experience STRONGLY demonstrated in the resume that directly matches a JD requirement — cite the resume evidence"
+  ],
+  "weakPoints": [
+    "A specific JD requirement that the resume fails to address — be constructive, name the exact gap"
+  ],
+  "selfIntro": "2-3 sentence professional introduction the candidate could deliver at the start of an interview",
+  "atsSuggestions": [
+    "Specific, actionable ATS improvement — e.g. 'Add the exact phrase X to your skills section', 'Replace Y with industry-standard term Z', 'Quantify achievement W with numbers'"
+  ],
   "interviewQuestions": [
-     { "skill": "string", "question": "string" }
+    { "skill": "<JD skill/requirement being tested>", "question": "<behavioural or technical question>" }
   ],
-  "answers": { "<question text>": "concise answer (2-3 sentences)" },
-
+  "answers": { "<exact question text>": "concise 2-3 sentence interview-ready answer" },
   "recommendedCourses": [
-    { "title": "Course or certification name", "reason": "Why this helps bridge a specific gap" }
+    { "title": "Course or certification name", "reason": "Exactly which gap this bridges" }
   ],
-  "preparationGuide": ["ordered step-by-step action items the candidate should complete before the interview"]
+  "preparationGuide": ["Ordered action item the candidate should complete before the interview"]
 }
 
-Instructions:
-- SCORE FORMULA: First, extract ALL required skills/keywords from the JD (mandatory + preferred). Count how many appear in the resume → matchedCount. totalRequired = total extracted. Base score = matchedCount / totalRequired. Then apply modifiers:
-  * +0.05 if the candidate's experience level matches the JD seniority
-  * +0.05 if domain/industry is the same
-  * -0.10 for each critical must-have skill that is missing (max -0.30)
-  * -0.05 for significant experience gap (e.g. JD needs 5 yrs, resume shows 2)
-  Clamp the final value between 0.10 and 0.98. Report it as a decimal (e.g. 0.72 not 72).
-- Identify the "strongly required" skills mentioned in the job description and generate **between 30 and 50 total interview questions**, distributing them across those skills.
-- Prefix or tag each question object with the corresponding skill name.
-- After listing all questions, provide an "answers" map where each key exactly matches one of the question texts and the value is a short (2-3 sentence) interview-ready answer.
-- Provide an array of "atsSuggestions" containing concrete resume edits that would help the candidate pass the ATS.
-- If no strongly required skills can be detected, fall back to 10 generic questions with skill value "generic" and still supply answers and ATS suggestions.
+SCORING RULES:
+  base = matchedCount / totalRequired
+  +0.05 if candidate seniority matches JD seniority
+  +0.05 if candidate domain/industry matches JD
+  -0.10 per critical must-have skill missing (cap at -0.30)
+  -0.05 if there is a significant experience gap (e.g. JD wants 5 yrs, resume shows 2)
+  Clamp result to [0.10, 0.98]. Express as decimal (0.72 not 72).
 
-Be specific, practical, and tailored to THIS resume and JD. Do not give generic advice.`;
+STRICT RULES:
+  - MATCHES must only contain skills/phrases that appear in BOTH the JD and the resume. Do not fabricate.
+  - MISSING must only contain skills/phrases required or preferred in the JD that are absent from the resume.
+  - STRONG POINTS must cite actual resume content (quote or paraphrase from the resume).
+  - WEAK POINTS must cite actual JD requirements that are unmet.
+  - ATS SUGGESTIONS: provide at least 6 specific, concrete suggestions referencing real content from both documents.
+  - INTERVIEW QUESTIONS: generate 30–50 questions, all based on JD requirements. Cover every major skill area in the JD.`;
 
-  const userPrompt = `RESUME:
-${resumeText}
+  const userPrompt = `JD EXTRACTED KEYWORDS:
+${jdWords.slice(0, 300).join(", ")}
 
-JOB DESCRIPTION:
-${jdText}`;
+CV EXTRACTED KEYWORDS:
+${cvWords.slice(0, 300).join(", ")}
 
+---
+FULL JOB DESCRIPTION:
+${jdText}
+
+---
+FULL RESUME:
+${resumeText}`;
+
+  // ── Step 3: Call Groq ───────────────────────────────────────────────────────
   const resp = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -153,34 +181,36 @@ ${jdText}`;
   const content = data.choices[0].message.content;
   const parsed = JSON.parse(content) as ScanResult;
 
-  // ── Ground-truth keyword verification ─────────────────────────────────────
-  // The LLM hallucinates: it invents skills not in the JD, or swaps matches
-  // and missing. We enforce correctness with three rules:
-  //   1. A skill is only valid if it actually appears in the JD text.
-  //   2. Among valid JD skills, those found in the resume → matches.
-  //   3. Among valid JD skills, those NOT in the resume → missing.
-  const resumeLower = resumeText.toLowerCase();
-  const jdLower     = jdText.toLowerCase();
+  // ── Step 4: Word-level verification ────────────────────────────────────────
+  // Exact-substring checks break multi-word skills ("machine learning", "cloud
+  // computing"). Instead we check at the individual-word level: a skill passes
+  // if at least one of its significant words appears in the extracted keyword
+  // set of the respective document.
+  const jdWordSet = new Set(jdWords);
+  const cvWordSet = new Set(cvWords);
 
-  const inResume = (s: string) => resumeLower.includes(s.toLowerCase());
-  const inJD     = (s: string) => jdLower.includes(s.toLowerCase());
+  // significant words of a skill = words longer than 2 chars, not stopwords
+  const sigWords = (s: string) =>
+    s.toLowerCase().split(/\W+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
 
-  // Combine both lists, deduplicate, then discard anything not in the JD
-  const allLLMSkills = [...new Set([...(parsed.matches ?? []), ...(parsed.missing ?? [])])];
-  const jdSkills     = allLLMSkills.filter(s => inJD(s));
+  const skillInJD = (s: string) => sigWords(s).some(w => jdWordSet.has(w));
+  const skillInCV = (s: string) => sigWords(s).some(w => cvWordSet.has(w));
 
-  // Split purely on resume presence — no LLM opinion involved
-  parsed.matches = jdSkills.filter(s =>  inResume(s));
-  parsed.missing = jdSkills.filter(s => !inResume(s));
+  // Combine LLM lists, dedupe, discard anything whose words don't appear in the JD
+  const allSkills = [...new Set([...(parsed.matches ?? []), ...(parsed.missing ?? [])])];
+  const jdSkills  = allSkills.filter(s => skillInJD(s));
 
-  // ── Recompute score from verified match data ────────────────────────────────
+  // Final split is determined purely by presence in CV — not LLM opinion
+  parsed.matches = jdSkills.filter(s =>  skillInCV(s));
+  parsed.missing = jdSkills.filter(s => !skillInCV(s));
+
+  // ── Step 5: Recompute score from verified lists ─────────────────────────────
   const m     = parsed.matches.length;
   const miss  = parsed.missing.length;
   const total = m + miss;
   if (total > 0) {
     const base     = m / total;
     const llmScore = parsed.score ?? 0;
-    // Override if LLM score deviates >15% from reality or is the classic fixed value
     if (Math.abs(llmScore - base) > 0.15 || llmScore === 0.85) {
       parsed.score = Math.min(0.98, Math.max(0.10, parseFloat(base.toFixed(2))));
     }
