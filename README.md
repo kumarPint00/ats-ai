@@ -121,15 +121,4 @@ Response example:
 
 By default the app uses OpenAI embeddings, but you can configure other providers such as Groq. The code checks `LLM_PROVIDER` environment variable and switches accordingly. Example environment variables for Groq:
 
-```bash
-# Groq embedding key (get one at https://console.groq.com/keys)
-GROQ_API_KEY=YOUR_GROQ_API_KEY_HERE
-MAX_QUESTIONS_PER_TEST=20
-QUESTION_GENERATION_TIMEOUT=300
-
-# LLM extraction provider
-LLM_PROVIDER=groq
-LLM_API_KEY=YOUR_LLM_API_KEY_HERE
-```
-
 Adjust these values or remove them as appropriate for your environment.
