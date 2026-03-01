@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ACCEPTED_EXTENSIONS } from "../lib/fileTypes";
+import { ACCEPTED_EXTENSIONS, ACCEPTED_LABEL } from "../lib/fileTypes";
+import type { ScanResult } from "../lib/scan";
 import {
   Box,
   Button,
@@ -21,11 +22,26 @@ export default function Home() {
   const [resume, setResume] = useState("");
   const [jd, setJd] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ScanResult | any>(null);
   const [history, setHistory] = useState<any[] | null>(null);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [jdFile, setJdFile] = useState<File | null>(null);
+  const [resumePreview, setResumePreview] = useState<string>("");
+  const [jdPreview, setJdPreview] = useState<string>("");
   const [activeTab, setActiveTab] = useState(0);
+
+  const processFile = (file: File, setter: (f: File | null) => void, previewSetter: (s: string) => void) => {
+    setter(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      previewSetter(String(reader.result));
+    };
+    if (/\.pdf$/i.test(file.name)) {
+      reader.readAsDataURL(file);
+    } else {
+      reader.readAsText(file);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +92,18 @@ export default function Home() {
 
   const normScore = (s: number) => (s > 1 ? s / 100 : s);
 
+  // group questions by skill for the Interview tab
+  const groupedQuestions: Record<string, { skill: string; question: string }[]> =
+    result?.interviewQuestions?.reduce(
+      (acc: Record<string, { skill: string; question: string }[]>, q: any) => {
+        const arr = acc[q.skill] || [];
+        arr.push(q);
+        acc[q.skill] = arr;
+        return acc;
+      },
+      {} as Record<string, { skill: string; question: string }[]>
+    ) || {};
+
   const TABS = [
     "✅ Keywords",
     "💪 Strengths",
@@ -92,16 +120,18 @@ export default function Home() {
       value: resume,
       setter: setResume,
       file: resumeFile,
-      fileSetter: setResumeFile,
+      fileSetter: (f: File | null) => f && processFile(f, setResumeFile, setResumePreview),
       color: "#818cf8",
+      preview: resumePreview,
     },
     {
       label: "Job Description",
       value: jd,
       setter: setJd,
       file: jdFile,
-      fileSetter: setJdFile,
+      fileSetter: (f: File | null) => f && processFile(f, setJdFile, setJdPreview),
       color: "#38bdf8",
+      preview: jdPreview,
     },
   ];
 
@@ -142,7 +172,7 @@ export default function Home() {
               gap: 3,
             }}
           >
-            {inputFields.map(({ label, value, setter, file, fileSetter, color }) => (
+            {inputFields.map(({ label, value, setter, file, fileSetter, color, preview }) => (
               <Box key={label} sx={{ display: "flex", flexDirection: "column" }}>
                 <Typography
                   variant="overline"
@@ -176,6 +206,7 @@ export default function Home() {
                   variant="outlined"
                   component="label"
                   size="small"
+                  title={ACCEPTED_LABEL}
                   sx={{
                     alignSelf: "start",
                     borderRadius: "8px",
@@ -198,6 +229,17 @@ export default function Home() {
                   <Typography variant="caption" sx={{ mt: 0.5, color, fontSize: "0.75rem" }}>
                     {file.name}
                   </Typography>
+                )}
+                {file && preview && (
+                  <Box sx={{ mt: 1, p: 1, border: "1px solid rgba(255,255,255,0.2)", borderRadius: 1, maxHeight: 120, overflow: "auto" }}>
+                    {/\.pdf$/i.test(file.name) ? (
+                      <object data={preview} type="application/pdf" width="100%" height="120px" />
+                    ) : (
+                      <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem", margin: 0 }}>
+                        {preview.slice(0, 2000)}
+                      </pre>
+                    )}
+                  </Box>
                 )}
               </Box>
             ))}
@@ -481,46 +523,73 @@ export default function Home() {
 
                 {/* ── Tab 4: Interview questions ── */}
                 {activeTab === 4 && (
-                  <List disablePadding>
-                    {result.interviewQuestions?.map((q: string, i: number) => (
-                      <ListItem
-                        key={i}
-                        sx={{
-                          px: 0,
-                          py: 1.5,
-                          borderBottom: "1px solid rgba(255,255,255,0.05)",
-                          "&:last-child": { borderBottom: "none" },
-                          alignItems: "flex-start",
-                        }}
-                      >
-                        <Box
-                          sx={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: "50%",
-                            background: "linear-gradient(135deg, #818cf8, #38bdf8)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            mr: 2,
-                            flexShrink: 0,
-                            mt: 0.15,
-                          }}
-                        >
-                          <Typography sx={{ fontSize: "0.68rem", color: "#fff", fontWeight: 800 }}>
-                            {i + 1}
-                          </Typography>
-                        </Box>
-                        <ListItemText
-                          primary={q}
-                          primaryTypographyProps={{ sx: { color: "rgba(255,255,255,0.82)", fontSize: "0.9rem", lineHeight: 1.65 } }}
-                        />
-                      </ListItem>
-                    ))}
-                    {(!result.interviewQuestions || result.interviewQuestions.length === 0) && (
-                      <Typography sx={{ color: "rgba(255,255,255,0.3)", py: 3, textAlign: "center" }}>No interview questions generated.</Typography>
+                  <Box>
+                    {result.selfIntro && (
+                      <Typography sx={{ color: "rgba(255,255,255,0.82)", mb: 2 }}>
+                        {result.selfIntro}
+                      </Typography>
                     )}
-                  </List>
+                    {Object.keys(groupedQuestions).length > 0 ? (
+                      Object.entries(groupedQuestions).map(([skill, qs]) => (
+                        <Box key={skill} sx={{ mb: 2 }}>
+                          <Typography variant="subtitle2" sx={{ color: "rgba(255,255,255,0.6)", mb: 1 }}>
+                            {skill}
+                          </Typography>
+                          <List disablePadding>
+                            {qs.map((q, idx) => (
+                              <ListItem
+                                key={idx}
+                                sx={{
+                                  px: 0,
+                                  py: 1.5,
+                                  borderBottom: "1px solid rgba(255,255,255,0.05)",
+                                  "&:last-child": { borderBottom: "none" },
+                                  alignItems: "flex-start",
+                                }}
+                              >
+                                <Box
+                                  sx={{
+                                    width: 28,
+                                    height: 28,
+                                    borderRadius: "50%",
+                                    background: "linear-gradient(135deg, #818cf8, #38bdf8)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    mr: 2,
+                                    flexShrink: 0,
+                                    mt: 0.15,
+                                  }}
+                                >
+                                  <Typography sx={{ fontSize: "0.68rem", color: "#fff", fontWeight: 800 }}>
+                                    {idx + 1}
+                                  </Typography>
+                                </Box>
+                                <ListItemText
+                                  primary={q.question}
+                                  primaryTypographyProps={{ sx: { color: "rgba(255,255,255,0.82)", fontSize: "0.9rem", lineHeight: 1.65 } }}
+                                  secondary={
+                                    result.answers?.[q.question] ? (
+                                      <Typography
+                                        variant="body2"
+                                        sx={{ color: "rgba(255,255,255,0.48)", mt: 0.5 }}
+                                      >
+                                        {result.answers[q.question]}
+                                      </Typography>
+                                    ) : null
+                                  }
+                                />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Box>
+                      ))
+                    ) : (
+                      <Typography sx={{ color: "rgba(255,255,255,0.3)", py: 3, textAlign: "center" }}>
+                        No interview questions generated.
+                      </Typography>
+                    )}
+                  </Box>
                 )}
 
                 {/* ── Tab 5: Courses ── */}

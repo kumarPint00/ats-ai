@@ -28,9 +28,15 @@ export interface ScanResult {
   grammarSuggestions: string[];
   strongPoints: string[];
   weakPoints: string[];
-  interviewQuestions: string[];
+  // each question is tagged with the skill it relates to; when no skills are
+  // identified the array may contain generic questions with skill "generic".
+  interviewQuestions: { skill: string; question: string }[];
+  // map from question text (exact match) to a short answer (2‑3 sentences).
+  answers: Record<string, string>;
   recommendedCourses: RecommendedCourse[];
   preparationGuide: string[];
+  // a brief professional self‑introduction the candidate could use at interview start
+  selfIntro: string;
 }
 
 /**
@@ -85,12 +91,25 @@ Perform a thorough deep-dive analysis and return ONLY valid JSON with this exact
 
   "strongPoints": ["concrete strengths of this resume relative to the JD — be specific"],
   "weakPoints": ["concrete weaknesses or gaps — be specific and constructive"],
-  "interviewQuestions": ["exactly 10 interview questions the hiring manager would ask this specific candidate based on their resume and the JD"],
+  "selfIntro": "a brief 2-3 sentence professional introduction the candidate could use at the start of an interview",
+
+  "interviewQuestions": [
+     { "skill": "string", "question": "string" }
+  ],
+  "answers": { "<question text>": "concise answer (2-3 sentences)" },
+
   "recommendedCourses": [
     { "title": "Course or certification name", "reason": "Why this helps bridge a specific gap" }
   ],
   "preparationGuide": ["ordered step-by-step action items the candidate should complete before the interview"]
 }
+
+Instructions:
+- Identify the "strongly required" skills mentioned in the job description and, for **each** such skill, generate **15 unique interview questions** targeting that skill.
+- Prefix or tag each question object with the corresponding skill name.
+- After listing all questions, provide an "answers" map where each key exactly matches one of the question texts and the value is a short (2-3 sentence) interview-ready answer.
+- If no strongly required skills can be detected, fall back to exactly 10 generic questions with skill value "generic" and provide answers accordingly.
+
 Be specific, practical, and tailored to THIS resume and JD. Do not give generic advice.`;
 
   const userPrompt = `RESUME:
