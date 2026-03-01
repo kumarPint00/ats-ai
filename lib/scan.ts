@@ -144,7 +144,7 @@ ${jdText}`;
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.4,
+      temperature: 0.15,
       response_format: { type: "json_object" },
     }),
   });
@@ -154,25 +154,24 @@ ${jdText}`;
   const parsed = JSON.parse(content) as ScanResult;
 
   // ── Ground-truth keyword verification ─────────────────────────────────────
-  // The LLM can hallucinate matches/missing. We verify every skill it reported
-  // against the ACTUAL resume text (case-insensitive substring check).
-  // Skills the LLM claimed matched but aren't in the resume → moved to missing.
-  // Skills the LLM claimed were missing but ARE in the resume → moved to matches.
+  // The LLM hallucinates: it invents skills not in the JD, or swaps matches
+  // and missing. We enforce correctness with three rules:
+  //   1. A skill is only valid if it actually appears in the JD text.
+  //   2. Among valid JD skills, those found in the resume → matches.
+  //   3. Among valid JD skills, those NOT in the resume → missing.
   const resumeLower = resumeText.toLowerCase();
+  const jdLower     = jdText.toLowerCase();
 
-  const llmMatches  = parsed.matches  ?? [];
-  const llmMissing  = parsed.missing  ?? [];
+  const inResume = (s: string) => resumeLower.includes(s.toLowerCase());
+  const inJD     = (s: string) => jdLower.includes(s.toLowerCase());
 
-  // A skill "exists in resume" if any word of it appears as a substring
-  const inResume = (skill: string) => resumeLower.includes(skill.toLowerCase());
+  // Combine both lists, deduplicate, then discard anything not in the JD
+  const allLLMSkills = [...new Set([...(parsed.matches ?? []), ...(parsed.missing ?? [])])];
+  const jdSkills     = allLLMSkills.filter(s => inJD(s));
 
-  const verifiedMatches  = llmMatches.filter(s =>  inResume(s));
-  const falseMatches     = llmMatches.filter(s => !inResume(s)); // claimed matched but not found
-  const verifiedMissing  = llmMissing.filter(s => !inResume(s));
-  const falselyMissing   = llmMissing.filter(s =>  inResume(s)); // claimed missing but actually there
-
-  parsed.matches = [...verifiedMatches, ...falselyMissing];
-  parsed.missing = [...verifiedMissing, ...falseMatches];
+  // Split purely on resume presence — no LLM opinion involved
+  parsed.matches = jdSkills.filter(s =>  inResume(s));
+  parsed.missing = jdSkills.filter(s => !inResume(s));
 
   // ── Recompute score from verified match data ────────────────────────────────
   const m     = parsed.matches.length;
