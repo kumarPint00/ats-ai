@@ -5,6 +5,7 @@ import { scanSemaphore } from "../../../lib/semaphore";
 import { appendScan, getAllScans } from "../../../lib/db";
 
 import { extractText } from "../../../lib/extractText";
+import { connectMongo } from "../../../lib/mongo";
 
 // helper to append CORS headers to every response
 const withCors = (res: NextResponse) => {
@@ -109,6 +110,20 @@ export async function POST(request: Request) {
       appendScan(result.score, result.summary);
     } catch (e) {
       console.warn("failed to write scan log", e);
+    }
+
+    // ── Persist candidate record in MongoDB if configured
+    try {
+      const mongo = await connectMongo();
+      await mongo.collection("scans").insertOne({
+        resumeText,
+        jdText,
+        score: result.score,
+        summary: result.summary,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn("mongo insert failed", e);
     }
 
     return json(result);
