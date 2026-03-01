@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0d0d1a;
+  --foreground: #e2e8f0;
 }
 
 @theme inline {
@@ -12,15 +12,109 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ─── Keyframe Animations ─── */
+
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
+@keyframes pulseGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px currentColor); }
+  50%       { filter: drop-shadow(0 0 22px currentColor); }
+}
+
+@keyframes shimmerSlide {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes floatUp {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+
+/* ─── Global Body ─── */
+
 body {
-  background: var(--background);
+  background: linear-gradient(-45deg, #0d0b1e, #1e1b4b, #1a1035, #0a0f2e);
+  background-size: 400% 400%;
+  animation: gradientShift 20s ease infinite;
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* ─── Glassmorphism card ─── */
+
+.glass {
+  background: rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* ─── Entry animation ─── */
+
+.fade-in-up {
+  animation: fadeInUp 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ─── Score ring ─── */
+
+.score-ring {
+  animation: pulseGlow 2.8s ease-in-out infinite;
+}
+
+/* ─── Glow button ─── */
+
+.glow-btn {
+  box-shadow: 0 0 24px rgba(129, 140, 248, 0.35), 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.glow-btn:hover {
+  box-shadow: 0 0 48px rgba(129, 140, 248, 0.55), 0 8px 24px rgba(0,0,0,0.4) !important;
+}
+
+/* ─── Shimmer loading bar ─── */
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.03) 25%,
+    rgba(255,255,255,0.1) 50%,
+    rgba(255,255,255,0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmerSlide 1.5s infinite;
+}
+
+/* ─── Page wrapper ─── */
+
+.page-bg {
+  background: transparent;
 }
