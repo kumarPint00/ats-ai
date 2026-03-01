@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { scanWithGroq } from "../../../lib/scan";
 import { checkRateLimit } from "../../../lib/rateLimit";
 import { scanSemaphore } from "../../../lib/semaphore";
-import { appendScan, getAllScans } from "../../../lib/db";
-
 import { extractText } from "../../../lib/extractText";
 import { connectMongo } from "../../../lib/mongo";
 
@@ -117,13 +115,6 @@ export async function POST(request: Request) {
       scanSemaphore.release();
     }
 
-    // ── T012: Atomic SQLite log write (replaces scans.json) ───────────────────
-    try {
-      appendScan(result.score, result.summary);
-    } catch (e) {
-      console.warn("failed to write scan log", e);
-    }
-
     // ── Persist candidate record in MongoDB if configured
     try {
       const { name, email, phone } = extractBasicInfo(resumeText);
@@ -164,10 +155,16 @@ export async function POST(request: Request) {
   }
 }
 
-// ── T013: GET /api/scan — return scan history from SQLite ─────────────────────
+// ── GET /api/scan — return scan history from MongoDB ────────────────────────────
 export async function GET() {
   try {
-    const scans = getAllScans();
+    const mongo = await connectMongo();
+    const scans = await mongo
+      .collection("scans")
+      .find({}, { projection: { _id: 0, score: 1, summary: 1, name: 1, email: 1, createdAt: 1 } })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
     return json(scans);
   } catch (err: any) {
     console.error("read log error", err);
