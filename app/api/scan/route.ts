@@ -6,8 +6,28 @@ import { appendScan, getAllScans } from "../../../lib/db";
 
 import { extractText } from "../../../lib/extractText";
 
+// helper to append CORS headers to every response
+const withCors = (res: NextResponse) => {
+  res.headers.set("Access-Control-Allow-Origin", "*");
+  res.headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.headers.set("Access-Control-Allow-Headers", "Content-Type");
+  return res;
+};
+
+// convenience wrapper for NextResponse.json that also adds CORS headers
+const json = (body: any, opts?: Parameters<typeof NextResponse.json>[1]) => {
+  const res = NextResponse.json(body, opts);
+  return withCors(res);
+};
+
 // ensure nodejs runtime so document parsers can access Node.js APIs
 export const runtime = "nodejs";
+
+// respond to CORS preflight requests so that POSTs from other origins succeed
+export function OPTIONS() {
+  const res = NextResponse.json({}, { status: 204 });
+  return withCors(res);
+}
 
 export async function POST(request: Request) {
   // ── T007: Per-IP rate limiting ─────────────────────────────────────────────
@@ -17,7 +37,7 @@ export async function POST(request: Request) {
     "unknown";
   const { limited, retryAfter } = checkRateLimit(ip);
   if (limited) {
-    return NextResponse.json(
+    return json(
       { error: `Rate limit exceeded. Try again in ${retryAfter} seconds.` },
       { status: 429, headers: { "Retry-After": String(retryAfter) } }
     );
@@ -41,7 +61,7 @@ export async function POST(request: Request) {
         const buf = Buffer.from(await resumeFile.arrayBuffer());
         resumeText = await extractText(buf, resumeFile.name ?? "resume");
         if (!resumeText) {
-          return NextResponse.json(
+          return json(
             { error: "Could not extract text from the resume file. If it is a scanned image, please paste the text instead." },
             { status: 400 }
           );
@@ -52,7 +72,7 @@ export async function POST(request: Request) {
         const buf = Buffer.from(await jdFileObj.arrayBuffer());
         jdText = await extractText(buf, jdFileObj.name ?? "jd");
         if (!jdText) {
-          return NextResponse.json(
+          return json(
             { error: "Could not extract text from the job description file. If it is a scanned image, please paste the text instead." },
             { status: 400 }
           );
@@ -65,11 +85,11 @@ export async function POST(request: Request) {
     }
 
     if (typeof resumeText !== "string" || typeof jdText !== "string") {
-      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+      return json({ error: "Invalid input" }, { status: 400 });
     }
 
     if (!resumeText.trim() || !jdText.trim()) {
-      return NextResponse.json(
+      return json(
         { error: "Both resumeText and jdText are required." },
         { status: 400 }
       );
@@ -91,7 +111,7 @@ export async function POST(request: Request) {
       console.warn("failed to write scan log", e);
     }
 
-    return NextResponse.json(result);
+    return json(result);
   } catch (err: any) {
     console.error("scan error", err);
     if (err?.stack) console.error(err.stack);
@@ -104,7 +124,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: err.message }, { status: 503 });
     }
 
-    return NextResponse.json(
+    return json(
       { error: err.message || "server error" },
       { status: 500 }
     );
@@ -115,9 +135,9 @@ export async function POST(request: Request) {
 export async function GET() {
   try {
     const scans = getAllScans();
-    return NextResponse.json(scans);
+    return json(scans);
   } catch (err: any) {
     console.error("read log error", err);
-    return NextResponse.json({ error: "unable to read log" }, { status: 500 });
+    return json({ error: "unable to read log" }, { status: 500 });
   }
 }
