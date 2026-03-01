@@ -10,6 +10,6 @@
 - [X] render grouped questions + toggleable answers in Interview tab; display selfIntro at top
 - [X] handle fallback when no strong skills detected (legacy 10 q)
 - [ ] write unit tests/automation for new behaviours (rate overview, preview, API shapes)
-- [ ] run `npm run build` and manual smoke tests for PDF, DOCX, and TXT uploads
-- [ ] update README.md/quickstart to mention new formats and preview feature
-- [ ] commit and push changes to `003-enriched-output` branch
+- [X] run `npm run build` and manual smoke tests for PDF, DOCX, and TXT uploads
+- [X] update README.md/quickstart to mention new formats and preview feature
+- [X] commit and push changes to `003-enriched-output` branch
