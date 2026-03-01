@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { ACCEPTED_EXTENSIONS, ACCEPTED_LABEL } from "../lib/fileTypes";
 import type { ScanResult } from "../lib/scan";
+// mammoth has a browser build; we'll load it dynamically when needed
+import mammoth from "mammoth";
 import {
   Box,
   Button,
@@ -30,8 +32,27 @@ export default function Home() {
   const [jdPreview, setJdPreview] = useState<string>("");
   const [activeTab, setActiveTab] = useState(0);
 
-  const processFile = (file: File, setter: (f: File | null) => void, previewSetter: (s: string) => void) => {
+  const processFile = async (file: File, setter: (f: File | null) => void, previewSetter: (s: string) => void) => {
     setter(file);
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    // some formats are binary but can be converted to text client-side
+    if (ext === "doc" || ext === "docx") {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        const text = result.value || "";
+        previewSetter(text);
+      } catch (err) {
+        console.error("mammoth preview failed", err);
+        previewSetter(`Could not preview .${ext} file.`);
+      }
+      return;
+    }
+    const binaryFormats = ["odt", "ods", "odp", "pptx", "xlsx"];
+    if (binaryFormats.includes(ext)) {
+      previewSetter(`Preview not available for .${ext} files.`);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       previewSetter(String(reader.result));
@@ -108,6 +129,7 @@ export default function Home() {
     "✅ Keywords",
     "💪 Strengths",
     "⚠️ Weaknesses",
+    "🛠️ ATS Tips",
     "✍️ Grammar",
     "🎤 Interview Prep",
     "📚 Courses",
@@ -231,12 +253,12 @@ export default function Home() {
                   </Typography>
                 )}
                 {file && preview && (
-                  <Box sx={{ mt: 1, p: 1, border: "1px solid rgba(255,255,255,0.2)", borderRadius: 1, maxHeight: 120, overflow: "auto" }}>
+                  <Box sx={{ mt: 1, p: 1, border: "1px solid rgba(255,255,255,0.2)", borderRadius: 1, maxHeight: 240, overflow: "auto" }}>
                     {/\.pdf$/i.test(file.name) ? (
-                      <object data={preview} type="application/pdf" width="100%" height="120px" />
+                      <object data={preview} type="application/pdf" width="100%" height="240px" />
                     ) : (
                       <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem", margin: 0 }}>
-                        {preview.slice(0, 2000)}
+                        {preview}
                       </pre>
                     )}
                   </Box>
@@ -495,8 +517,34 @@ export default function Home() {
                   </List>
                 )}
 
-                {/* ── Tab 3: Grammar ── */}
+                {/* ── Tab 3: ATS tips ── */}
                 {activeTab === 3 && (
+                  <List disablePadding>
+                    {result.atsSuggestions?.map((s: string, i: number) => (
+                      <ListItem
+                        key={i}
+                        sx={{
+                          px: 0,
+                          py: 1.5,
+                          borderBottom: "1px solid rgba(255,255,255,0.05)",
+                          "&:last-child": { borderBottom: "none" },
+                        }}
+                      >
+                        <Box sx={{ mr: 2, color: "#fbbf24", flexShrink: 0, fontSize: "1rem" }}>🛠️</Box>
+                        <ListItemText
+                          primary={s}
+                          primaryTypographyProps={{ sx: { color: "rgba(255,255,255,0.82)", fontSize: "0.9rem", lineHeight: 1.65 } }}
+                        />
+                      </ListItem>
+                    ))}
+                    {(!result.atsSuggestions || result.atsSuggestions.length === 0) && (
+                      <Typography sx={{ color: "rgba(255,255,255,0.3)", py: 3, textAlign: "center" }}>No ATS-specific suggestions provided.</Typography>
+                    )}
+                  </List>
+                )}
+
+                {/* ── Tab 3: Grammar ── */}
+                {activeTab === 4 && (
                   <List disablePadding>
                     {result.grammarSuggestions?.map((s: string, i: number) => (
                       <ListItem
@@ -522,7 +570,7 @@ export default function Home() {
                 )}
 
                 {/* ── Tab 4: Interview questions ── */}
-                {activeTab === 4 && (
+                {activeTab === 5 && (
                   <Box>
                     {result.selfIntro && (
                       <Typography sx={{ color: "rgba(255,255,255,0.82)", mb: 2 }}>
@@ -593,7 +641,7 @@ export default function Home() {
                 )}
 
                 {/* ── Tab 5: Courses ── */}
-                {activeTab === 5 && (
+                {activeTab === 6 && (
                   <Box
                     sx={{
                       display: "grid",
@@ -633,7 +681,7 @@ export default function Home() {
                 )}
 
                 {/* ── Tab 6: Prep guide ── */}
-                {activeTab === 6 && (
+                {activeTab === 7 && (
                   <List disablePadding>
                     {result.preparationGuide?.map((step: string, i: number) => (
                       <ListItem
