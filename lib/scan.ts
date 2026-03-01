@@ -22,6 +22,8 @@ export interface RecommendedCourse {
 
 export interface ScanResult {
   score: number;
+  matchedCount?: number;
+  totalRequired?: number;
   matches: string[];
   missing: string[];
   summary: string;
@@ -85,7 +87,9 @@ export async function scanWithGroq(
 You will receive a candidate's resume and a job description.
 Perform a thorough deep-dive analysis and return ONLY valid JSON with this exact structure (no extra keys, no markdown):
 {
-  "score": <number 0-1 reflecting ATS keyword match and overall fit>,
+  "score": <compute this precisely using the formula below — do NOT default to 0.85>,
+  "matchedCount": <number of JD keywords/skills found in resume>,
+  "totalRequired": <number of total required keywords/skills identified in the JD>,
   "matches": ["list of skills/keywords present in BOTH resume and JD"],
   "missing": ["important skills/keywords in JD that are absent from resume"],
   "summary": "2-3 sentence overall assessment of the candidate's fit",
@@ -108,6 +112,12 @@ Perform a thorough deep-dive analysis and return ONLY valid JSON with this exact
 }
 
 Instructions:
+- SCORE FORMULA: First, extract ALL required skills/keywords from the JD (mandatory + preferred). Count how many appear in the resume → matchedCount. totalRequired = total extracted. Base score = matchedCount / totalRequired. Then apply modifiers:
+  * +0.05 if the candidate's experience level matches the JD seniority
+  * +0.05 if domain/industry is the same
+  * -0.10 for each critical must-have skill that is missing (max -0.30)
+  * -0.05 for significant experience gap (e.g. JD needs 5 yrs, resume shows 2)
+  Clamp the final value between 0.10 and 0.98. Report it as a decimal (e.g. 0.72 not 72).
 - Identify the "strongly required" skills mentioned in the job description and generate **between 30 and 50 total interview questions**, distributing them across those skills.
 - Prefix or tag each question object with the corresponding skill name.
 - After listing all questions, provide an "answers" map where each key exactly matches one of the question texts and the value is a short (2-3 sentence) interview-ready answer.
@@ -134,7 +144,7 @@ ${jdText}`;
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.1,
+      temperature: 0.4,
       response_format: { type: "json_object" },
     }),
   });
@@ -142,5 +152,24 @@ ${jdText}`;
   const data = await resp.json();
   const content = data.choices[0].message.content;
   const parsed = JSON.parse(content) as ScanResult;
+
+  // ── Recompute score from actual match data so a hallucinated fixed value
+  //    can never slip through. Use LLM score only if it used the rubric
+  //    (i.e. matchedCount and totalRequired are present and consistent).
+  const m = parsed.matches?.length ?? 0;
+  const miss = parsed.missing?.length ?? 0;
+  const total = m + miss;
+  if (total > 0) {
+    // weighted: matches carry 80% weight, deduct for missing critical skills
+    const base = m / total;
+    // use LLM-provided score only if it's within ±0.15 of our derived base
+    const llmScore = parsed.score ?? 0;
+    const deviation = Math.abs(llmScore - base);
+    if (deviation > 0.15 || llmScore === 0.85) {
+      // LLM returned a suspicious/fixed value — override with our calculation
+      parsed.score = Math.min(0.98, Math.max(0.10, parseFloat(base.toFixed(2))));
+    }
+  }
+
   return parsed;
 }
