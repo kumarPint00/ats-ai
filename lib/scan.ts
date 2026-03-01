@@ -145,19 +145,17 @@ STRICT RULES:
   - ATS SUGGESTIONS: provide at least 6 specific, concrete suggestions referencing real content from both documents.
   - INTERVIEW QUESTIONS: generate 30–50 questions, all based on JD requirements. Cover every major skill area in the JD.`;
 
-  const userPrompt = `JD EXTRACTED KEYWORDS:
-${jdWords.slice(0, 300).join(", ")}
-
-CV EXTRACTED KEYWORDS:
-${cvWords.slice(0, 300).join(", ")}
-
----
-FULL JOB DESCRIPTION:
+  const userPrompt = `=== FULL JOB DESCRIPTION ===
 ${jdText}
 
----
-FULL RESUME:
-${resumeText}`;
+=== FULL RESUME ===
+${resumeText}
+
+=== SUPPLEMENTARY: JD KEYWORD TOKENS (for reference) ===
+${jdWords.join(", ")}
+
+=== SUPPLEMENTARY: CV KEYWORD TOKENS (for reference) ===
+${cvWords.join(", ")}`;
 
   // ── Step 3: Call Groq ───────────────────────────────────────────────────────
   const resp = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
