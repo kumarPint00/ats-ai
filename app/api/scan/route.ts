@@ -7,6 +7,18 @@ import { appendScan, getAllScans } from "../../../lib/db";
 import { extractText } from "../../../lib/extractText";
 import { connectMongo } from "../../../lib/mongo";
 
+// basic candidate info extractor from resume text
+const extractBasicInfo = (text: string) => {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const emailMatch = text.match(/[\w.-]+@[\w.-]+/);
+  const phoneMatch = text.match(/\+?\d[\d\s\-]{7,}\d/);
+  return {
+    name: lines[0] || null,
+    email: emailMatch ? emailMatch[0] : null,
+    phone: phoneMatch ? phoneMatch[0] : null,
+  };
+};
+
 // helper to append CORS headers to every response
 const withCors = (res: NextResponse) => {
   res.headers.set("Access-Control-Allow-Origin", "*");
@@ -114,8 +126,12 @@ export async function POST(request: Request) {
 
     // ── Persist candidate record in MongoDB if configured
     try {
+      const { name, email, phone } = extractBasicInfo(resumeText);
       const mongo = await connectMongo();
       await mongo.collection("scans").insertOne({
+        name,
+        email,
+        phone,
         resumeText,
         jdText,
         score: result.score,
