@@ -1,18 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  webpack(config, { isServer }) {
-    if (isServer) {
-      // Native Node.js addons cannot be bundled by webpack.
-      // Mark them as external so they're required at runtime instead.
-      config.externals = [
-        ...(Array.isArray(config.externals) ? config.externals : []),
-        "better-sqlite3",
-        "officeparser",
-      ];
-    }
-    return config;
-  },
+  // Next.js 16 uses Turbopack by default; an empty config prevents the
+  // "webpack config with no turbopack config" build error on Vercel.
+  turbopack: {},
 };
 
 export default nextConfig;
