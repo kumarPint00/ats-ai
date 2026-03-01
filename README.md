@@ -7,11 +7,11 @@
 - 🎯 **ATS Score** — circular score ring with colour-coded match percentage
 - 💪 **Strengths / ⚠️ Weaknesses** — JD-relative analysis
 - ✍️ **Grammar Suggestions** — original → suggested phrasing
-- 🎤 **Interview Prep** — 10 tailored questions
+- 🎤 **Interview Prep** — 15 questions per core skill, grouped by skill, with interview-ready answers and a suggested self-introduction
 - 📚 **Course Recommendations** — skill-gap bridging courses
 - 🗺️ **Preparation Guide** — step-by-step action plan
 - 🕘 **Scan History** — persistent log (no PII stored)
-- 📎 **PDF / TXT upload** support
+- 📎 **Multi-format upload & preview** – PDF, Word, ODT, PPTX, XLSX, TXT, MD, CSV, RTF; see a quick document preview before scanning
 
 ## Quick Start
 

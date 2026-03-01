@@ -1,13 +1,28 @@
 import { NextResponse } from "next/server";
 import { scanWithGroq } from "../../../lib/scan";
+import { checkRateLimit } from "../../../lib/rateLimit";
+import { scanSemaphore } from "../../../lib/semaphore";
+import { appendScan, getAllScans } from "../../../lib/db";
 
-import fs from "fs";
-import pdfParse from "pdf-parse";
+import { extractText } from "../../../lib/extractText";
 
-// ensure nodejs runtime so formidable can access the underlying request
+// ensure nodejs runtime so document parsers can access Node.js APIs
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  // ── T007: Per-IP rate limiting ─────────────────────────────────────────────
+  const ip =
+    request.headers.get("x-forwarded-for") ??
+    request.headers.get("x-real-ip") ??
+    "unknown";
+  const { limited, retryAfter } = checkRateLimit(ip);
+  if (limited) {
+    return NextResponse.json(
+      { error: `Rate limit exceeded. Try again in ${retryAfter} seconds.` },
+      { status: 429, headers: { "Retry-After": String(retryAfter) } }
+    );
+  }
+
   try {
     let resumeText: string | undefined;
     let jdText: string | undefined;
@@ -15,7 +30,6 @@ export async function POST(request: Request) {
     const contentType = request.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
-      // use the built-in Web FormData API available on Next.js request
       const formData = await request.formData();
       const rText = formData.get("resumeText");
       const jText = formData.get("jdText");
@@ -25,11 +39,10 @@ export async function POST(request: Request) {
       const resumeFile = formData.get("resumeFile") as any;
       if (resumeFile && typeof resumeFile.arrayBuffer === "function") {
         const buf = Buffer.from(await resumeFile.arrayBuffer());
-        const data = await pdfParse(buf);
-        resumeText = data.text;
-        if (!resumeText?.trim()) {
+        resumeText = await extractText(buf, resumeFile.name ?? "resume");
+        if (!resumeText) {
           return NextResponse.json(
-            { error: "Resume PDF appears to be image-only — no text could be extracted. Please paste text instead." },
+            { error: "Could not extract text from the resume file. If it is a scanned image, please paste the text instead." },
             { status: 400 }
           );
         }
@@ -37,11 +50,10 @@ export async function POST(request: Request) {
       const jdFileObj = formData.get("jdFile") as any;
       if (jdFileObj && typeof jdFileObj.arrayBuffer === "function") {
         const buf = Buffer.from(await jdFileObj.arrayBuffer());
-        const data = await pdfParse(buf);
-        jdText = data.text;
-        if (!jdText?.trim()) {
+        jdText = await extractText(buf, jdFileObj.name ?? "jd");
+        if (!jdText) {
           return NextResponse.json(
-            { error: "Job description PDF appears to be image-only — no text could be extracted. Please paste text instead." },
+            { error: "Could not extract text from the job description file. If it is a scanned image, please paste the text instead." },
             { status: 400 }
           );
         }
@@ -57,47 +69,53 @@ export async function POST(request: Request) {
     }
 
     if (!resumeText.trim() || !jdText.trim()) {
-      return NextResponse.json({ error: "Both resumeText and jdText are required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Both resumeText and jdText are required." },
+        { status: 400 }
+      );
     }
 
-    // call Groq chat completion to analyse the resume against the JD
-    const result = await scanWithGroq(resumeText, jdText);
-
-    // append minimal log — no PII (data-model.md: only score + summary + timestamp)
+    // ── T010: Concurrency semaphore — cap at 5 simultaneous Groq calls ────────
+    await scanSemaphore.acquire();
+    let result;
     try {
-      const logDir = "data";
-      const logFile = `${logDir}/scans.json`;
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-      }
-      let arr: any[] = [];
-      if (fs.existsSync(logFile)) {
-        const existing = fs.readFileSync(logFile, "utf-8");
-        arr = JSON.parse(existing);
-      }
-      arr.push({ score: result.score, summary: result.summary, createdAt: new Date().toISOString() });
-      fs.writeFileSync(logFile, JSON.stringify(arr, null, 2));
+      result = await scanWithGroq(resumeText, jdText);
+    } finally {
+      scanSemaphore.release();
+    }
+
+    // ── T012: Atomic SQLite log write (replaces scans.json) ───────────────────
+    try {
+      appendScan(result.score, result.summary);
     } catch (e) {
-      console.warn("failed to write log", e);
+      console.warn("failed to write scan log", e);
     }
 
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("scan error", err);
-    if (err && err.stack) console.error(err.stack);
-    return NextResponse.json({ error: err.message || "server error" }, { status: 500 });
+    if (err?.stack) console.error(err.stack);
+
+    // ── T009 / T011: Map well-known errors to correct HTTP status codes ────────
+    if (err?.message?.includes("AI service is busy")) {
+      return NextResponse.json({ error: err.message }, { status: 503 });
+    }
+    if (err?.message?.includes("Server is busy")) {
+      return NextResponse.json({ error: err.message }, { status: 503 });
+    }
+
+    return NextResponse.json(
+      { error: err.message || "server error" },
+      { status: 500 }
+    );
   }
 }
 
+// ── T013: GET /api/scan — return scan history from SQLite ─────────────────────
 export async function GET() {
   try {
-    const logFile = "data/scans.json";
-    if (!fs.existsSync(logFile)) {
-      return NextResponse.json([], { status: 200 });
-    }
-    const content = fs.readFileSync(logFile, "utf-8");
-    const arr = JSON.parse(content);
-    return NextResponse.json(arr);
+    const scans = getAllScans();
+    return NextResponse.json(scans);
   } catch (err: any) {
     console.error("read log error", err);
     return NextResponse.json({ error: "unable to read log" }, { status: 500 });
