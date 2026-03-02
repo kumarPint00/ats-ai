@@ -2,6 +2,9 @@
 const STOPWORDS = new Set([
   "the", "and", "a", "an", "of", "to", "in", "for",
   "with", "on", "by", "is", "it", "that", "this", "as",
+  "are", "was", "were", "be", "been", "have", "has", "had",
+  "do", "does", "did", "will", "would", "could", "should",
+  "may", "might", "shall", "can", "not", "no", "or", "but",
 ]);
 
 export function extractKeywords(text: string): string[] {
@@ -10,7 +13,7 @@ export function extractKeywords(text: string): string[] {
       text
         .toLowerCase()
         .split(/\W+/)
-        .filter((w) => w && !STOPWORDS.has(w))
+        .filter((w) => w.length > 2 && !STOPWORDS.has(w))
     )
   );
 }
@@ -74,6 +77,39 @@ async function fetchWithRetry(
   throw new Error("AI service is busy. Please try again shortly.");
 }
 
+// ── Shared Groq call helper ────────────────────────────────────────────────
+async function callGroq(key: string, systemPrompt: string, userPrompt: string): Promise<any> {
+  const resp = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: userPrompt  },
+      ],
+      temperature: 0.15,
+      response_format: { type: "json_object" },
+    }),
+  });
+  const data = await resp.json();
+  return JSON.parse(data.choices[0].message.content);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MULTI-AGENT scanWithGroq
+//
+//  Agent 1 (sequential)  – Gap Analyst
+//    Sole job: read the JD, list every required skill, decide which are in the
+//    CV and which aren't. Nothing else.
+//
+//  Agents 2, 3, 4 (parallel, run after Agent 1 to use its output)
+//    Agent 2 – Resume Quality Analyst  (strengths, weaknesses, grammar, ATS tips)
+//    Agent 3 – Interview Coach         (questions + answers, based on JD only)
+//    Agent 4 – Career Advisor          (summary, courses, prep guide)
+//
+//  Score is computed server-side from Agent 1's verified lists.
+// ─────────────────────────────────────────────────────────────────────────────
 export async function scanWithGroq(
   resumeText: string,
   jdText: string
@@ -81,138 +117,161 @@ export async function scanWithGroq(
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error("GROQ_API_KEY is not set in your environment.");
 
-  // ── Step 1: Extract keyword tokens from both documents ──────────────────────
-  // These are sent alongside the full texts so the LLM can do semantic matching
-  // against a structured vocabulary rather than free-reading both walls of text.
   const jdWords = extractKeywords(jdText);
   const cvWords = extractKeywords(resumeText);
-
-  // ── Step 2: Build prompt ────────────────────────────────────────────────────
-  const systemPrompt = `You are a senior ATS analyst and career coach with 15+ years of recruiting experience.
-
-You will receive:
-  1. JD EXTRACTED KEYWORDS — individual tokens pulled from the Job Description
-  2. CV EXTRACTED KEYWORDS  — individual tokens pulled from the Candidate's Resume
-  3. The full Job Description text
-  4. The full Resume text
-
-Perform a precise gap analysis and return ONLY valid JSON (no markdown fences, no extra keys):
-{
-  "score": <decimal 0.10–0.98 — see scoring rules below>,
-  "matchedCount": <integer: count of matched skills>,
-  "totalRequired": <integer: count of all JD skills you evaluated>,
-  "matches": [
-    "Skill or technology from the JD that is clearly present in the resume — use the natural skill name, e.g. 'Python', 'REST APIs', 'Agile'"
-  ],
-  "missing": [
-    "Skill or technology required/preferred in the JD that is absent from the resume"
-  ],
-  "summary": "2-3 sentence overall assessment of candidate fit for this specific role",
-  "grammarSuggestions": ["Resume issue — format: Original: '...' → Suggested: '...'"],
-  "strongPoints": [
-    "A specific skill, achievement, or experience STRONGLY demonstrated in the resume that directly matches a JD requirement — cite the resume evidence"
-  ],
-  "weakPoints": [
-    "A specific JD requirement that the resume fails to address — be constructive, name the exact gap"
-  ],
-  "selfIntro": "2-3 sentence professional introduction the candidate could deliver at the start of an interview",
-  "atsSuggestions": [
-    "Specific, actionable ATS improvement — e.g. 'Add the exact phrase X to your skills section', 'Replace Y with industry-standard term Z', 'Quantify achievement W with numbers'"
-  ],
-  "interviewQuestions": [
-    { "skill": "<JD skill/requirement being tested>", "question": "<behavioural or technical question>" }
-  ],
-  "answers": { "<exact question text>": "concise 2-3 sentence interview-ready answer" },
-  "recommendedCourses": [
-    { "title": "Course or certification name", "reason": "Exactly which gap this bridges" }
-  ],
-  "preparationGuide": ["Ordered action item the candidate should complete before the interview"]
-}
-
-SCORING RULES:
-  base = matchedCount / totalRequired
-  +0.05 if candidate seniority matches JD seniority
-  +0.05 if candidate domain/industry matches JD
-  -0.10 per critical must-have skill missing (cap at -0.30)
-  -0.05 if there is a significant experience gap (e.g. JD wants 5 yrs, resume shows 2)
-  Clamp result to [0.10, 0.98]. Express as decimal (0.72 not 72).
-
-STRICT RULES:
-  - MATCHES must only contain skills/phrases that appear in BOTH the JD and the resume. Do not fabricate.
-  - MISSING must only contain skills/phrases required or preferred in the JD that are absent from the resume.
-  - STRONG POINTS must cite actual resume content (quote or paraphrase from the resume).
-  - WEAK POINTS must cite actual JD requirements that are unmet.
-  - ATS SUGGESTIONS: provide at least 6 specific, concrete suggestions referencing real content from both documents.
-  - INTERVIEW QUESTIONS: generate 30–50 questions, all based on JD requirements. Cover every major skill area in the JD.`;
-
-  const userPrompt = `=== FULL JOB DESCRIPTION ===
-${jdText}
-
-=== FULL RESUME ===
-${resumeText}
-
-=== SUPPLEMENTARY: JD KEYWORD TOKENS (for reference) ===
-${jdWords.join(", ")}
-
-=== SUPPLEMENTARY: CV KEYWORD TOKENS (for reference) ===
-${cvWords.join(", ")}`;
-
-  // ── Step 3: Call Groq ───────────────────────────────────────────────────────
-  const resp = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.15,
-      response_format: { type: "json_object" },
-    }),
-  });
-
-  const data = await resp.json();
-  const content = data.choices[0].message.content;
-  const parsed = JSON.parse(content) as ScanResult;
-
-  // ── Step 4: Word-level verification ────────────────────────────────────────
-  // Exact-substring checks break multi-word skills ("machine learning", "cloud
-  // computing"). Instead we check at the individual-word level: a skill passes
-  // if at least one of its significant words appears in the extracted keyword
-  // set of the respective document.
   const jdWordSet = new Set(jdWords);
   const cvWordSet = new Set(cvWords);
 
-  // significant words of a skill = words longer than 2 chars, not stopwords
   const sigWords = (s: string) =>
     s.toLowerCase().split(/\W+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
-
   const skillInJD = (s: string) => sigWords(s).some(w => jdWordSet.has(w));
   const skillInCV = (s: string) => sigWords(s).some(w => cvWordSet.has(w));
 
-  // Combine LLM lists, dedupe, discard anything whose words don't appear in the JD
-  const allSkills = [...new Set([...(parsed.matches ?? []), ...(parsed.missing ?? [])])];
-  const jdSkills  = allSkills.filter(s => skillInJD(s));
+  // ── AGENT 1: Gap Analyst ────────────────────────────────────────────────────
+  const gap = await callGroq(
+    key,
+    `You are a strict ATS keyword gap analyst. Your ONLY job is to compare a Job Description against a Resume and identify skill/keyword matches and gaps.
 
-  // Final split is determined purely by presence in CV — not LLM opinion
-  parsed.matches = jdSkills.filter(s =>  skillInCV(s));
-  parsed.missing = jdSkills.filter(s => !skillInCV(s));
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "jdSkills": ["every distinct skill, technology, tool, methodology, or qualification mentioned in the JD"],
+  "matches":  ["skills from jdSkills that are clearly present in the resume"],
+  "missing":  ["skills from jdSkills that are absent from the resume"],
+  "matchedCount": <integer>,
+  "totalRequired": <integer>,
+  "score": <decimal 0.10-0.98: matchedCount/totalRequired with these modifiers:
+    +0.05 if seniority level matches, +0.05 if same domain,
+    -0.10 per critical missing must-have (max -0.30), -0.05 for major experience gap>
+}
 
-  // ── Step 5: Recompute score from verified lists ─────────────────────────────
-  const m     = parsed.matches.length;
-  const miss  = parsed.missing.length;
+RULES:
+- Every item in "matches" MUST appear in BOTH the JD and the resume. Read both carefully.
+- Every item in "missing" MUST be required/preferred in the JD and absent from the resume.
+- Do NOT invent skills. Only use what is actually written in the texts.
+- jdSkills is the union of matches + missing.`,
+    `=== FULL JOB DESCRIPTION ===\n${jdText}\n\n=== FULL RESUME ===\n${resumeText}`
+  );
+
+  // Server-side word-level verification of Agent 1's output
+  const allSkills  = [...new Set([...(gap.matches ?? []), ...(gap.missing ?? [])])];
+  const jdSkills   = allSkills.filter(s => skillInJD(s));
+  const matches    = jdSkills.filter(s =>  skillInCV(s));
+  const missing    = jdSkills.filter(s => !skillInCV(s));
+
+  const m     = matches.length;
+  const miss  = missing.length;
   const total = m + miss;
-  if (total > 0) {
-    const base     = m / total;
-    const llmScore = parsed.score ?? 0;
-    if (Math.abs(llmScore - base) > 0.15 || llmScore === 0.85) {
-      parsed.score = Math.min(0.98, Math.max(0.10, parseFloat(base.toFixed(2))));
-    }
-  }
+  const base  = total > 0 ? m / total : 0.5;
+  const llmScore = gap.score ?? 0;
+  const score = (total > 0 && Math.abs(llmScore - base) > 0.15) || llmScore === 0.85
+    ? Math.min(0.98, Math.max(0.10, parseFloat(base.toFixed(2))))
+    : llmScore;
 
-  return parsed;
+  // ── AGENTS 2, 3, 4 in parallel ─────────────────────────────────────────────
+  const matchedList  = matches.join(", ") || "none identified";
+  const missingList  = missing.join(", ") || "none identified";
+
+  const [quality, interview, career] = await Promise.all([
+
+    // ── AGENT 2: Resume Quality Analyst ──────────────────────────────────────
+    callGroq(
+      key,
+      `You are a professional resume reviewer and ATS specialist.
+
+You will receive a resume, a job description, and pre-computed lists of matched and missing skills.
+
+Return ONLY valid JSON:
+{
+  "strongPoints": [
+    "A strength DIRECTLY EVIDENCED in the resume text that satisfies a JD requirement. Quote or paraphrase the resume. Min 5 items."
+  ],
+  "weakPoints": [
+    "A specific JD requirement that the resume fails to address. Name the exact gap. Min 3 items."
+  ],
+  "grammarSuggestions": [
+    "Resume language issue — format: Original: '...' → Suggested: '...'"
+  ],
+  "atsSuggestions": [
+    "Concrete, specific ATS fix referencing actual content from both documents. Min 6 items. Examples: 'Add the phrase X to your skills section', 'Replace Y with industry-standard term Z', 'Quantify the achievement W with metrics'."
+  ]
+}
+
+RULES:
+- strongPoints must cite evidence from the resume text. No generic statements.
+- weakPoints must cite requirements from the JD text. No generic statements.
+- atsSuggestions must be actionable and specific to THIS resume + JD pair.`,
+      `=== JOB DESCRIPTION ===\n${jdText}\n\n=== RESUME ===\n${resumeText}\n\n=== MATCHED SKILLS ===\n${matchedList}\n\n=== MISSING SKILLS ===\n${missingList}`
+    ),
+
+    // ── AGENT 3: Interview Coach ──────────────────────────────────────────────
+    callGroq(
+      key,
+      `You are a technical interview coach preparing a candidate for a specific role.
+
+You will receive only the Job Description. Generate interview questions based purely on what the JD requires.
+
+Return ONLY valid JSON:
+{
+  "selfIntro": "A 2-3 sentence professional self-introduction tailored to this specific role that the candidate can deliver at interview start",
+  "interviewQuestions": [
+    { "skill": "<exact JD requirement or skill area being tested>", "question": "<specific behavioural or technical question>" }
+  ],
+  "answers": {
+    "<exact question text>": "Concise 2-3 sentence interview-ready answer using STAR format where applicable"
+  }
+}
+
+RULES:
+- Generate between 30 and 50 questions.
+- Every question must map to a real requirement in the JD.
+- Distribute questions across ALL major skill areas listed in the JD.
+- The "answers" object must have one key per question, matching the question text exactly.
+- Do NOT ask generic questions unrelated to this JD.`,
+      `=== FULL JOB DESCRIPTION ===\n${jdText}`
+    ),
+
+    // ── AGENT 4: Career Advisor ───────────────────────────────────────────────
+    callGroq(
+      key,
+      `You are a career advisor helping a candidate understand their fit for a specific role and plan their next steps.
+
+You will receive the job description, the resume, and pre-computed matched/missing skill lists.
+
+Return ONLY valid JSON:
+{
+  "summary": "2-3 sentence honest assessment of the candidate's fit for THIS specific role, mentioning their strongest relevant qualification and their biggest gap",
+  "recommendedCourses": [
+    { "title": "Specific course, certification, or resource name", "reason": "Exactly which missing skill from the gap list this addresses" }
+  ],
+  "preparationGuide": [
+    "Specific, ordered action item the candidate should complete before the interview — reference actual gaps or JD requirements"
+  ]
+}
+
+RULES:
+- summary must mention candidate name if detectable, the role, their best strength, and their key gap.
+- recommendedCourses must map to actual missing skills. Min 3 items.
+- preparationGuide must be ordered by priority and specific to this JD. Min 5 items.`,
+      `=== JOB DESCRIPTION ===\n${jdText}\n\n=== RESUME ===\n${resumeText}\n\n=== MATCHED SKILLS ===\n${matchedList}\n\n=== MISSING SKILLS ===\n${missingList}`
+    ),
+  ]);
+
+  // ── Assemble final result ───────────────────────────────────────────────────
+  return {
+    score,
+    matchedCount: m,
+    totalRequired: total,
+    matches,
+    missing,
+    summary:            career.summary            ?? "",
+    grammarSuggestions: quality.grammarSuggestions ?? [],
+    strongPoints:       quality.strongPoints       ?? [],
+    weakPoints:         quality.weakPoints         ?? [],
+    atsSuggestions:     quality.atsSuggestions     ?? [],
+    selfIntro:          interview.selfIntro        ?? "",
+    interviewQuestions: interview.interviewQuestions ?? [],
+    answers:            interview.answers          ?? {},
+    recommendedCourses: career.recommendedCourses  ?? [],
+    preparationGuide:   career.preparationGuide    ?? [],
+  };
 }
