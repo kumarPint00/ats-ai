@@ -249,10 +249,10 @@ Return ONLY valid JSON:
 }
 
 TONE RULES based on ATS score (provided below):
-  - Score < 0.40 : Candidate is a weak match. State clearly they are missing critical skills. Do NOT use "strong candidate".
-  - Score 0.40–0.59 : Candidate is a partial match. Acknowledge both strengths and significant gaps honestly.
-  - Score 0.60–0.74 : Candidate is a moderate match. Positive but note important gaps.
-  - Score >= 0.75 : Candidate is a strong match. Highlight strengths, briefly mention minor gaps.
+  - Score < 0.50 : Candidate is a weak match. State clearly they are missing critical skills. Do NOT use "strong candidate".
+  - Score 0.50–0.74 : Candidate is a partial match. Acknowledge both strengths and significant gaps honestly.
+  - Score 0.74–0.92 : Candidate is a moderate match. Positive but note important gaps.
+  - Score >= 0.92 : Candidate is a strong match. Highlight strengths, briefly mention minor gaps.
 
 RULES:
 - summary MUST reflect the score range above. If score < 0.60, do not call the candidate "strong".
