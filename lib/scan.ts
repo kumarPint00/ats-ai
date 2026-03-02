@@ -233,13 +233,13 @@ RULES:
     // ── AGENT 4: Career Advisor ───────────────────────────────────────────────
     callGroq(
       key,
-      `You are a career advisor helping a candidate understand their fit for a specific role and plan their next steps.
+      `You are a career advisor giving an honest, data-driven assessment of a candidate's fit for a specific role.
 
-You will receive the job description, the resume, and pre-computed matched/missing skill lists.
+You will receive the job description, the resume, pre-computed matched/missing skill lists, and the ATS score.
 
 Return ONLY valid JSON:
 {
-  "summary": "2-3 sentence honest assessment of the candidate's fit for THIS specific role, mentioning their strongest relevant qualification and their biggest gap",
+  "summary": "2-3 sentence honest, score-calibrated assessment — see tone rules below",
   "recommendedCourses": [
     { "title": "Specific course, certification, or resource name", "reason": "Exactly which missing skill from the gap list this addresses" }
   ],
@@ -248,11 +248,18 @@ Return ONLY valid JSON:
   ]
 }
 
+TONE RULES based on ATS score (provided below):
+  - Score < 0.40 : Candidate is a weak match. State clearly they are missing critical skills. Do NOT use "strong candidate".
+  - Score 0.40–0.59 : Candidate is a partial match. Acknowledge both strengths and significant gaps honestly.
+  - Score 0.60–0.74 : Candidate is a moderate match. Positive but note important gaps.
+  - Score >= 0.75 : Candidate is a strong match. Highlight strengths, briefly mention minor gaps.
+
 RULES:
-- summary must mention candidate name if detectable, the role, their best strength, and their key gap.
-- recommendedCourses must map to actual missing skills. Min 3 items.
+- summary MUST reflect the score range above. If score < 0.60, do not call the candidate "strong".
+- summary must mention the candidate's name (if detectable), the specific role, their single best matched skill, and their most critical missing skill.
+- recommendedCourses must each map to a specific item from the MISSING SKILLS list. Min 3 items.
 - preparationGuide must be ordered by priority and specific to this JD. Min 5 items.`,
-      `=== JOB DESCRIPTION ===\n${jdText}\n\n=== RESUME ===\n${resumeText}\n\n=== MATCHED SKILLS ===\n${matchedList}\n\n=== MISSING SKILLS ===\n${missingList}`
+      `=== ATS SCORE ===\n${score} (${Math.round(score * 100)}% match — ${m} of ${total} JD skills found in resume)\n\n=== JOB DESCRIPTION ===\n${jdText}\n\n=== RESUME ===\n${resumeText}\n\n=== MATCHED SKILLS ===\n${matchedList}\n\n=== MISSING SKILLS ===\n${missingList}`
     ),
   ]);
 
